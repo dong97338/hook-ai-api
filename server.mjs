@@ -1,4 +1,4 @@
-import express from 'express'
+import Fastify from 'fastify'
 import axios from 'axios'
 
 import {Pinecone} from '@pinecone-database/pinecone'
@@ -8,56 +8,61 @@ import OpenAIApi from 'openai'
 
 dotenv.config()
 
-const app = express()
-app.use(express.json())
+const fastify = Fastify({logger: true})
 
 const pinecone = new Pinecone({apiKey: process.env.PINECONE_API_KEY})
 
 // Pinecone Index 초기화
 const index = pinecone.Index('data')
 
-app.post('/process-urls', async (req, res) => {
-  console.log('Received request to process URLs.')
+fastify.post('/process-urls', async (req, reply) => {
+  fastify.log.info('Received request to process URLs.')
   const urls = req.body.urls
-  console.log(`Processing ${urls.length} URLs.`)
+  fastify.log.info(`Processing ${urls.length} URLs.`)
 
-  const texts = await Promise.all(urls.map(url => fetchAndExtractText(url)))
-  console.log('Text extraction completed.')
+  try {
+    const texts = await Promise.all(urls.map(url => fetchAndExtractText(url)))
+    fastify.log.info('Text extraction completed.')
 
-  console.log('texts', texts )
+    fastify.log.info('texts', texts)
 
-  const processedData = await Promise.all(texts.map(text => processText(text)))
-  console.log('Text processing completed.')
+    const processedData = await Promise.all(texts.map(text => processText(text)))
+    fastify.log.info('Text processing completed.')
 
-  // Pinecone에 데이터 업로드
-  let vectors = processedData.flatMap(data => data.vectors)
-  console.log(`Upserting ${vectors.length} vectors into Pinecone.`)
+    // Pinecone에 데이터 업로드
+    let vectors = processedData.flatMap(data => data.vectors)
+    fastify.log.info(`Upserting ${vectors.length} vectors into Pinecone.`)
 
-  let batch_size = 10
-  let num_batches = vectors.length / 10 // vectors.length / 10 + 1이었는데 마지막에서 values가 빈칸으로 나오는 오류때문에 일단 뺐음
+    let batch_size = 10
+    let num_batches = Math.ceil(vectors.length / 10) // 수정된 부분: 올바른 배치 수 계산
 
-  for (let i = 0; i < num_batches; ++i) {
-    console.log(`Processing batch ${i + 1} of ${num_batches}`)
-    let start_idx = i * batch_size
-    let end_idx = start_idx + batch_size
-    let batch_vectors = vectors.slice(start_idx, end_idx).map(vector => ({
-      id: vector.id,
-      values: vector.values,
-      metadata: vector.metadata
-    }))
-    // console.log(batch_vectors)
-    await index.namespace('hook').upsert(batch_vectors)
+    for (let i = 0; i < num_batches; ++i) {
+      fastify.log.info(`Processing batch ${i + 1} of ${num_batches}`)
+      let start_idx = i * batch_size
+      let end_idx = start_idx + batch_size
+      let batch_vectors = vectors.slice(start_idx, end_idx).map(vector => ({
+        id: vector.id,
+        values: vector.values,
+        metadata: vector.metadata
+      }))
+      await index.namespace('hook').upsert(batch_vectors)
+    }
+
+    reply.send({processedData})
+    fastify.log.info('Data returned to the client.')
+  } catch (error) {
+    fastify.log.error(error)
+    reply.status(500).send({error: 'An error occurred while processing URLs.'})
   }
-
-  // index.namespace('hook').upsert({ vectors });
-
-  res.json({processedData})
-  console.log('Data returned to the client.')
 })
 
 const PORT = process.env.PORT || 3389
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
+fastify.listen({port: PORT, host: '0.0.0.0'}, (err, address) => {
+  if (err) {
+    fastify.log.error(err)
+    process.exit(1)
+  }
+  fastify.log.info(`Server running on ${address}`)
 })
 
 const messages = []
@@ -72,41 +77,42 @@ const systemPrompt = {
 }
 messages.push(systemPrompt)
 
-// Pinecone 인덱스 연결 설정
-
-app.post('/query', async (req, res) => {
+fastify.post('/query', async (req, reply) => {
   const userQuery = req.body.query
 
-  console.log('userQuery: ', userQuery)
+  fastify.log.info('userQuery: ', userQuery)
 
-  messages.push({role: 'user', content: userQuery})
+  try {
+    messages.push({role: 'user', content: userQuery})
 
-  const queryEmbeddings = await getEmbeddings(userQuery)
+    const queryEmbeddings = await getEmbeddings(userQuery)
 
-  const retrievedChunks = await index.namespace('hook').query({
-    vector: queryEmbeddings,
-    topK: 7,
-    includeMetadata: true
-  })
+    const retrievedChunks = await index.namespace('hook').query({
+      vector: queryEmbeddings,
+      topK: 7,
+      includeMetadata: true
+    })
 
-  let contexts = ''
+    let contexts = ''
 
-  for (let context of retrievedChunks.matches) {
-    contexts += context.metadata.chunk + '\n\n'
+    for (let context of retrievedChunks.matches) {
+      contexts += context.metadata.chunk + '\n\n'
+    }
+
+    const contextPrompt = {
+      role: 'system',
+      content: `[Context]${contexts}`
+    }
+
+    messages.push(contextPrompt)
+
+    const fullResponse = await generateResponse(messages)
+
+    fastify.log.info('Full response: ', fullResponse)
+
+    reply.send({response: fullResponse})
+  } catch (error) {
+    fastify.log.error(error)
+    reply.status(500).send({error: 'An error occurred while processing the query.'})
   }
-
-  const contextPrompt = {
-    role: 'system',
-    content: `[Context]${contexts}`
-  }
-
-  messages.push(contextPrompt)
-
-  const fullResponse = await generateResponse(messages)
-
-  // console.log('messages: ', messages)
-
-  console.log('Full response: ', fullResponse)
-
-  res.json({response: fullResponse})
 })
