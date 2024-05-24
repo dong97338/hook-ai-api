@@ -11,5 +11,13 @@
     "pinecone-client": "^2.0.0",
     "uuid": "^9.0.1"
   },
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.6",
+    "@babel/preset-env": "^7.24.6",
+    "babel-jest": "^29.7.0"
+  }
 }
