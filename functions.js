@@ -1,32 +1,35 @@
-import axios from 'axios'
-import cheerio from 'cheerio'
 import {v4 as uuidv4} from 'uuid'
 import OpenAIApi from 'openai'
 import dotenv from 'dotenv'
+import puppeteer from 'puppeteer'
 
 dotenv.config()
 const openai = new OpenAIApi({key: process.env.OPENAI_API_KEY})
 const useGPT = 1
 
 export async function fetchAndExtractText(url) {
+  let browser
   try {
-    const response = await axios.get(url)
-    const $ = cheerio.load(response.data)
-    $('script, style, head, title, meta').remove()
-    return $('body').text().trim()
+    browser = await puppeteer.launch({headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox']})
+    const page = await browser.newPage()
+    await page.goto(url, {waitUntil: 'networkidle2'})
+    let content = await page.evaluate(() => document.body.innerText)
+    return content.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDFFF](?=[\uD800-\uDFFF])|[\uDC00-\uDFFF]/g, '')
   } catch (error) {
     console.error(`Error: ${error}`)
     return ''
+  } finally {
+    if (browser) {
+      await browser.close()
+    }
   }
 }
 
 export async function processText(text) {
   const {title, summary} = useGPT ? await generateTitleAndSummary(text.slice(0, 10000)) : {title: 'Generated Title', summary: 'Generated Summary'}
-  const keywords = useGPT ? await generateKeyWords(text.slice(0, 10000)) : ['키워드1', '키워드2', '키워드3']
-  console.log(keywords)
   const chunks = splitTextIntoChunks(text, 512)
   const vectors = await Promise.all(chunks.map((chunk, i) => processChunk(chunk, title, summary, i, chunks.length)))
-  return {title, keywords, summary, vectors}
+  return {title, summary, vectors}
 }
 
 async function processChunk(chunk, title, summary, index, total) {
@@ -75,7 +78,7 @@ async function generateTitleAndSummary(text) {
 }
 
 //주어진 텍스트로부터 키워드 3개를 리스트로 반환
-async function generateKeyWords(text) {
+export async function generateKeyWords(text) {
   const response = await openai.chat.completions.create({
     model: 'gpt-3.5-turbo-0125',
     messages: [
