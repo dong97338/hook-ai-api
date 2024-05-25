@@ -1,7 +1,7 @@
 import Fastify from 'fastify'
 import {Pinecone} from '@pinecone-database/pinecone'
 import dotenv from 'dotenv'
-import {fetchAndExtractText, processText, getEmbeddings, generateResponse} from './functions.js'
+import {fetchAndExtractText, processText, getEmbeddings, generateResponse, generateKeyWords} from './functions.js'
 
 dotenv.config()
 const fastify = Fastify({logger: true})
@@ -10,10 +10,10 @@ const ns = pinecone.Index('data').namespace('hook')
 
 fastify.post('/process-urls', async (req, reply) => {
   try {
-    const {userId, space, urls} = req.body
-    const texts = await Promise.all(urls.map(fetchAndExtractText))
-    const processedData = await Promise.all(texts.map(processText))
-    const vectors = processedData.flatMap(data => data.vectors)
+    const {userId, space, url} = req.body
+    const text = await fetchAndExtractText(url)
+    const processedData = await processText(text)
+    const vectors = processedData.vectors
     for (let i = 0; i < vectors.length; i += 10) {
       await ns.upsert(vectors.slice(i, i + 10).map(({id, values, metadata}) => ({id: `${userId}-${id}`, values, metadata: {...metadata, userId, space}})))
     }
@@ -23,6 +23,19 @@ fastify.post('/process-urls', async (req, reply) => {
     reply.status(500).send({error: 'An error occurred while processing URLs.'})
   }
 })
+
+fastify.post('/keywords', async (req, reply) => {
+  try {
+    const {url} = req.body
+    const text = await fetchAndExtractText(url)
+    const keywords = await generateKeyWords(text)
+    reply.send({keywords})
+  } catch (error) {
+    fastify.log.error(error)
+    reply.status(500).send({error: 'An error occurred while generating keywords.'})
+  }
+})
+
 
 const messages = [
   {
@@ -41,12 +54,15 @@ fastify.post('/query', async (req, reply) => {
     console.log('Contexts:', contexts)
     messages.push({role: 'system', content: `[Context]${contexts}`})
     const fullResponse = await generateResponse(messages)
-    reply.send({response: fullResponse})
+    console.log(fullResponse)
+    reply.send({response: fullResponse, contexts})
   } catch (error) {
     fastify.log.error(error)
     reply.status(500).send({error: 'An error occurred while processing the query.'})
   }
 })
+
+
 
 fastify.listen({port: process.env.PORT || 3389, host: '0.0.0.0'}, (err, address) => {
   if (err) {
