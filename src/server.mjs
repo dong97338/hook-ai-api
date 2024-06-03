@@ -46,9 +46,9 @@ const messages = [
 
 fastify.post('/query', async (req, reply) => {
   try {
-    const {userId, query: userQuery} = req.body
-    messages.push({role: 'user', content: userQuery})
-    const queryEmbeddings = await getEmbeddings(userQuery)
+    const {userId, conversations} = req.body
+    messages.push(...conversations)
+    const queryEmbeddings = await getEmbeddings(messages.at(-1).content)
     const retrievedChunks = await ns.query({vector: queryEmbeddings, topK: 7, includeMetadata: true, filter: {userId: userId}})
     const contexts = retrievedChunks.matches.map(context => context.metadata.chunk).join('\n\n')
     console.log('Contexts:', contexts)
