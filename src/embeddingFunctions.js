@@ -7,11 +7,11 @@ const openai = new OpenAIApi({apiKey: process.env.OPENAI_API_KEY})
 const model = 'text-embedding-3-small'
 
 export async function processChunk(chunk, title, summary) {
-  const embeddingResponse = await openai.createEmbedding({model, input: `${title}\n${summary}\n${chunk}`})
+  const embeddingResponse = await openai.embeddings.create({model, input: `${title}\n${summary}\n${chunk}`})
   return {id: uuidv4(), values: embeddingResponse.data[0].embedding, metadata: {title, summary, chunk}}
 }
 
 export async function getEmbeddings(text) {
-  const response = await openai.createEmbedding({model, input: text})
+  const response = await openai.embeddings.create({model, input: text})
   return response.data[0].embedding
 }
