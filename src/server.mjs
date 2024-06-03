@@ -1,12 +1,22 @@
 import Fastify from 'fastify'
 import {Pinecone} from '@pinecone-database/pinecone'
 import dotenv from 'dotenv'
-import {fetchAndExtractText, processText, getEmbeddings, generateResponse, generateKeyWords} from './functions.js'
+import {fetchAndExtractText, generateTitleAndSummary, generateResponse, generateKeyWords} from './generatingFunctions.js'
+import {processChunk, getEmbeddings} from './embeddingFunctions.js'
 
 dotenv.config()
 const fastify = Fastify({logger: true})
 const pinecone = new Pinecone({apiKey: process.env.PINECONE_API_KEY})
 const ns = pinecone.Index('data').namespace('hook')
+
+const splitTextIntoChunks = (text, size) => Array.from({length: Math.ceil(text.length / size)}, (_, i) => text.slice(i * size, (i + 1) * size))
+
+async function processText(text) {
+  const {title, summary} = process.env.USE_GPT ? await generateTitleAndSummary(text.slice(0, 10000)) : {title: 'Generated Title', summary: 'Generated Summary'}
+  const chunks = splitTextIntoChunks(text, 512)
+  const vectors = await Promise.all(chunks.map((chunk, i) => processChunk(chunk, title, summary)))
+  return {title, summary, vectors}
+}
 
 fastify.post('/process-urls', async (req, reply) => {
   try {
@@ -51,10 +61,8 @@ fastify.post('/query', async (req, reply) => {
     const queryEmbeddings = await getEmbeddings(messages.at(-1).content)
     const retrievedChunks = await ns.query({vector: queryEmbeddings, topK: 7, includeMetadata: true, filter: {userId: userId}})
     const contexts = retrievedChunks.matches.map(context => context.metadata.chunk).join('\n\n')
-    console.log('Contexts:', contexts)
     messages.push({role: 'system', content: `[Context]${contexts}`})
     const fullResponse = await generateResponse(messages)
-    console.log(fullResponse)
     reply.send({response: fullResponse, contexts})
   } catch (error) {
     fastify.log.error(error)
