@@ -12,12 +12,13 @@ fastify.post('/process-urls', async (req, reply) => {
   try {
     const {userId, space, url} = req.body
     const text = await fetchAndExtractText(url)
+    const keywords = await generateKeyWords(text)
+    reply.send({keywords})
     const processedData = await processText(text)
     const vectors = processedData.vectors
     for (let i = 0; i < vectors.length; i += 10) {
-      await ns.upsert(vectors.slice(i, i + 10).map(({id, values, metadata}) => ({id: `${userId}-${id}`, values, metadata: {...metadata, userId, space}})))
+      await ns.upsert(vectors.slice(i, i + 10).map(({id, values, metadata}) => ({id: `${userId}-${id}`, values, metadata: {...metadata, keywords, url, userId, space}})))
     }
-    reply.send({processedData})
   } catch (error) {
     fastify.log.error(error)
     reply.status(500).send({error: 'An error occurred while processing URLs.'})
@@ -35,7 +36,6 @@ fastify.post('/keywords', async (req, reply) => {
     reply.status(500).send({error: 'An error occurred while generating keywords.'})
   }
 })
-
 
 const messages = [
   {
@@ -61,8 +61,6 @@ fastify.post('/query', async (req, reply) => {
     reply.status(500).send({error: 'An error occurred while processing the query.'})
   }
 })
-
-
 
 fastify.listen({port: process.env.PORT || 3389, host: '0.0.0.0'}, (err, address) => {
   if (err) {
