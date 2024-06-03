@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer'
 
 dotenv.config()
 const openai = new OpenAIApi({apiKey: process.env.OPENAI_API_KEY})
-const model = 'gpt-3.5-turbo-0125'
+export const generateResponse = async messages => (await openai.chat.completions.create({model: 'gpt-3.5-turbo-0125', messages, temperature: 0})).choices[0].message.content.trim()
 
 export async function fetchAndExtractText(url) {
   let browser
@@ -26,33 +26,21 @@ export async function fetchAndExtractText(url) {
 
 export async function generateTitleAndSummary(text) {
   console.log('text', text)
-  const messages = [
+  const title = await generateResponse([
     {role: 'system', content: '너는 웹페이지의 제목을 만드는 봇이야. 내용을 읽고 제목을 만들어줘'},
     {role: 'user', content: `[content]${text}`}
-  ]
-  const titleResponse = await openai.chat.completions.create({model, messages, temperature: 0, max_tokens: 100})
-  const title = titleResponse.choices[0].message.content.trim()
-
-  messages[0].content = '너는 웹페이지를 요약하는 봇이야. 내용을 하나의 긴 문단으로 요약해줘'
-  messages[1].content = `[title]${title}\n[content]${text}`
-  const summaryResponse = await openai.chat.completions.create({model, messages, temperature: 0, max_tokens: 4095})
-  const summary = summaryResponse.choices[0].message.content.trim()
-
+  ])
+  const summary = await generateResponse([
+    {role: 'system', content: '너는 웹페이지를 요약하는 봇이야. 내용을 하나의 긴 문단으로 요약해줘'},
+    {role: 'user', content: `[title]${title}\n[content]${text}`}
+  ])
   return {title, summary}
 }
 
 export async function generateKeyWords(text) {
-  const response = await openai.chat.completions.create({
-    model,
-    messages: [
-      {role: 'system', content: '너는 텍스트로부터 키워드를 추출하는 봇이야. 텍스트를 읽고 키워드를 3개 추출하고 쉼표로 구분해줘.'},
-      {role: 'user', content: `[content]${text}`}
-    ]
-  })
-  return response.choices[0].message.content.split(',').map(keyword => keyword.trim())
-}
-
-export async function generateResponse(messages) {
-  const response = await openai.chat.completions.create({model, messages, temperature: 0})
-  return response.choices[0].message.content
+  const keywords = await generateResponse([
+    {role: 'system', content: '너는 텍스트로부터 키워드를 추출하는 봇이야. 텍스트를 읽고 키워드를 3개 추출하고 쉼표로 구분해줘.'},
+    {role: 'user', content: `[content]${text}`}
+  ])
+  return keywords.split(',').map(keyword => keyword.trim())
 }
