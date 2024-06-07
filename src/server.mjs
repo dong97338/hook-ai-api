@@ -1,11 +1,20 @@
 import Fastify from 'fastify'
 import {Pinecone} from '@pinecone-database/pinecone'
 import dotenv from 'dotenv'
-import {fetchAndExtractText, generateTitleAndSummary, generateResponse, generateKeyWords} from './generatingFunctions.js'
+import {generateStream, fetchAndExtractText, generateTitleAndSummary, generateResponse, generateKeyWords} from './generatingFunctions.js'
 import {processChunk, getEmbeddings} from './embeddingFunctions.js'
+import { fastifyCors } from '@fastify/cors'
+
+const fastify = Fastify({ logger: true });
+
+fastify.register(fastifyCors, {
+  origin: '*', // 모든 도메인에서의 요청을 허용
+  methods: ['GET', 'POST'], // 허용할 메소드 설정
+
+});
 
 dotenv.config()
-const fastify = Fastify({logger: true})
+// const fastify = Fastify({logger: true})
 const pinecone = new Pinecone({apiKey: process.env.PINECONE_API_KEY})
 const ns = pinecone.Index('data').namespace('hook')
 const splitTextIntoChunks = (text, size) => Array.from({length: Math.ceil(text.length / size)}, (_, i) => text.slice(i * size, (i + 1) * size))
@@ -51,6 +60,23 @@ fastify.post('/query', async (req, reply) => {
   const response = await generateResponse([systemPrompt, ...conversations, {role: 'system', content: `[Context]${contexts}`}])
   reply.send({response, contexts})
 })
+
+fastify.get('/stream', async (req, reply) => {
+  const conversations = JSON.parse(req.query.conversations); // GET 요청에서 query parameters로 받습니다.
+  const userId = req.query.userId;
+  
+  // 예외 처리를 추가하여 오류를 핸들링합니다.
+  const vector = await getEmbeddings(conversations.at(-1).content);
+  const { matches } = await ns.query({ vector, topK: 7, includeMetadata: true, filter: { userId } });
+  const contexts = matches.map(c => c.metadata.chunk).join('\n\n');
+  const stream = await generateStream([systemPrompt, ...conversations, { role: 'system', content: `[Context]${contexts}` }]);
+
+  reply.raw.writeHead(200, { 'Content-Type': 'text/plain','Access-Control-Allow-Origin': '*'  });
+  for await (const part of stream) {
+    reply.raw.write(part.choices[0]?.delta?.content || '');
+  }
+  reply.raw.end();
+});
 
 fastify.listen({port: process.env.PORT || 3389, host: '0.0.0.0'}, (err, address) => {
   if (err) {
