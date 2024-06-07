@@ -5,13 +5,17 @@ import puppeteer from 'puppeteer'
 dotenv.config()
 const openai = new OpenAIApi({apiKey: process.env.OPENAI_API_KEY})
 export const generateResponse = async messages => (await openai.chat.completions.create({model: 'gpt-3.5-turbo-0125', messages, temperature: 0})).choices[0].message.content.trim()
+export const generateStream = async messages => {
+  const response = await openai.chat.completions.create({model: 'gpt-3.5-turbo-0125', messages, temperature: 0, stream: true})
+  return response
+}
 
 export async function fetchAndExtractText(url) {
   let browser
   try {
     browser = await puppeteer.launch({headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox']})
     const page = await browser.newPage()
-    await Promise.race([page.goto(url, {waitUntil: 'networkidle2'}), new Promise(r => setTimeout(r, 5000))])
+    await Promise.race([page.goto(url, {waitUntil: 'networkidle2'}), new Promise(r => setTimeout(r, 4000))])
     const content = await page.evaluate(() => document.body.innerText)
     return content.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDFFF](?=[\uD800-\uDFFF])|[\uDC00-\uDFFF]/g, '')
   } catch (error) {
