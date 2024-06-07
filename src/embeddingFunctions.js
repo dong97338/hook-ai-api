@@ -11,7 +11,7 @@ export async function processChunk(chunk, title, summary) {
   return {id: uuidv4(), values: embeddingResponse.data[0].embedding, metadata: {title, summary, chunk}}
 }
 
-export async function getEmbeddings(text) {
-  const response = await openai.embeddings.create({model, input: text})
+export async function getEmbeddings(input) {
+  const response = await openai.embeddings.create({model, input})
   return response.data[0].embedding
 }
